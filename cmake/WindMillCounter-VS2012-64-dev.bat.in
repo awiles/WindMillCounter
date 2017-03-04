@@ -1,0 +1,11 @@
+call "C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\vcvarsall.bat" amd64
+
+if not exist setupRuntimePaths-openExternals.bat (
+	echo "Cannot find setupRuntimePaths-openExternals.bat. Is openExternals installed properly?."
+	exit /b
+)
+
+call setupRuntimePaths-openExternals.bat @BUILD_TYPE@
+
+cd @WindMillCounter_BINARY_DIR@
+devenv WindMillCounter.sln

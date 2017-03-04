@@ -1,0 +1,14 @@
+#!/bin/bash
+
+cd @CMAKE_BINARY_DIR@/../
+
+if [ -f "setupRuntimePaths-openExternals.sh" ]
+then
+    source setupRuntimePaths-openExternals.sh
+    echo "Open the Qt Creator project."
+    @QT_DIR@/../../Qt\ Creator.app/Contents/MacOS/Qt\ Creator ./DanceWall/CMakeLists.txt
+else
+    echo "Cannot find setupRuntimePaths-openExternals.bat. Is openExternals installed properly?."
+fi
+
+
