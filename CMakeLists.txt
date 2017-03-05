@@ -85,14 +85,17 @@ else()
 	message(FATAL_ERROR "Cannot not find openExternals project.")
 endif()
 
+# Eigen
+include_directories( ${WindMillCounter_EIGEN_DIR} )
+
+# OpenCV
 find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
 
 find_package(OpenIGTLink REQUIRED)
 include(${OpenIGTLink_USE_FILE})
 
 ########  WINDMILL COUNTER  ########
-include_directories(${OpenCV_INCLUDE_DIRS})
-
 set(WindMillCounter_SRCS
 	main.cxx
 	WindMillCounter.cxx

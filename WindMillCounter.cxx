@@ -1,9 +1,7 @@
 #include "WindMillCounter.h"
 
 #define IGTCLIENT 1
-
-using namespace cv;
-using namespace std;
+#define TRACKING_BUFFER_SIZE 5
 
 WindMillCounter::WindMillCounter()
 {
@@ -20,6 +18,9 @@ WindMillCounter::WindMillCounter()
 	this->m_headerMsg = igtl::MessageHeader::New();
 	this->m_timestamp = igtl::TimeStamp::New();	
 	this->m_positionMessage = igtl::PositionMessage::New();
+	
+	this->m_angularSpeed = 0.0;
+	this->m_maxAngularSpeed = 0.0;
 }
 
 WindMillCounter::~WindMillCounter()
@@ -38,9 +39,9 @@ bool WindMillCounter::init()
 	int r = this->m_socket->ConnectToServer(this->m_serverIP.c_str(), this->m_serverPort);
 	if( r != 0 )
 	{
-	cerr << "Cannot connect to the server -- IP: " << this->m_serverIP
-	<< ", Port: " << this->m_serverPort << endl;
-	return false;
+		cerr << "Cannot connect to the server -- IP: " << this->m_serverIP
+			<< ", Port: " << this->m_serverPort << endl;
+		return false;
 	}
 #else
 	// create the server socket.
@@ -58,6 +59,11 @@ bool WindMillCounter::init()
 		return false;
 	}
 #endif
+
+	this->m_trackingFrames.clear();
+	this->m_angularSpeed = 0.0;
+	this->m_maxAngularSpeed = 0.0;
+
 	return true;
 }
 
@@ -68,7 +74,7 @@ bool WindMillCounter::updateFrame()
 	bMessageSuccess = this->getNewIGTLinkMessage();
 
 	// update the output image.
-	this->buildOutFrame(3.1456788);
+	this->buildOutFrame();
 	// show image.
 	imshow("Windmill Counter", this->m_outFrame);
 
@@ -80,6 +86,10 @@ bool WindMillCounter::onKeyPress(int keyPress)
 	bool bSuccess = true;
 	switch((char)keyPress)
 	{
+	case 'r': // reset the max speed.
+		cout << "r key pressed, reset max angular speed." << endl;
+		this->m_maxAngularSpeed = 0.0;
+		break;
 	case 27: // 'esc' key
 		cout << "esc key pressed, exiting..." << endl;
 		bSuccess = false;
@@ -93,32 +103,48 @@ bool WindMillCounter::onKeyPress(int keyPress)
 	return bSuccess;
 }
 
-bool WindMillCounter::buildOutFrame(float rpm)
+bool WindMillCounter::buildOutFrame()
 {
-	// build string.
-	stringstream stream;
-	stream << fixed << setprecision(1) << rpm << " rpm";
-	string text = stream.str();
-
 	// helper variables.
 	int fontFace = CV_FONT_HERSHEY_SIMPLEX;
-	double fontScale = 5;
+	double fontScale = 2.5;
 	int thickness = 3;
-
 	// initialize black image.
 	Mat img(600, 800, CV_8UC3, Scalar::all(0));
 
-	// get text size.
+	stringstream streamAS, streamMAS;
+	
+	// build string -- angular speed.
+	streamAS << "Speed: " << (int)this->m_angularSpeed << " RPM";
+	string textAS = streamAS.str();
+
+	// build string -- max angular speed.
+	streamMAS << "Max:   " << (int)this->m_maxAngularSpeed << " RPM";
+	string textMAS = streamMAS.str();
+
+	// get text size -- angular speed.
 	int baseline = 0;
-	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
+	Size textSizeAS = getTextSize(textAS, fontFace, fontScale, thickness, &baseline);
 
-	// center the text.
-	Point textOrg(
-		(img.cols - textSize.width)/2,
-		(img.rows + textSize.height)/2);
+	// get text size -- max angular speed.
+	baseline = 0;
+	Size textSizeMAS = getTextSize(textMAS, fontFace, fontScale, thickness, &baseline);
 
-	// put text in middle.
-	putText(img, text, textOrg, fontFace, fontScale, Scalar(0,0,255), thickness, 8);
+	// center the text -- angular speed.
+	Point textOrgAS(
+		(img.cols - textSizeAS.width)/2,
+		(img.rows + textSizeAS.height)/2);
+
+	// center the text near bottom -- max angular speed.
+	Point textOrgMAS(
+		(img.cols - textSizeMAS.width)/2,
+		(img.rows + textSizeMAS.height)*3/4);
+
+	// put text to image -- angular speed.
+	putText(img, textAS, textOrgAS, fontFace, fontScale, Scalar(0,0,255), thickness, 8);
+
+	// put text to image -- max angular speed.
+	putText(img, textMAS, textOrgMAS, fontFace, fontScale, Scalar(0,255,0), thickness, 8);
 
 	img.copyTo(this->m_outFrame);
 
@@ -175,7 +201,7 @@ bool WindMillCounter::getNewIGTLinkMessage()
 				this->m_positionMessage->GetPosition(position);
 				this->m_positionMessage->GetQuaternion(quaternion);
 
-				this->printFrameInfo(frameNumber, toolName, position, quaternion);
+				this->addTrackingFrame(frameNumber, toolName, position, quaternion);
 			}
 			else
 			{
@@ -184,7 +210,7 @@ bool WindMillCounter::getNewIGTLinkMessage()
 			}
 
 		}
-		
+
 	}
 	else
 	{
@@ -195,10 +221,58 @@ bool WindMillCounter::getNewIGTLinkMessage()
 	return true;
 }
 
-bool WindMillCounter::printFrameInfo(igtlUint64 frame, string name, float *pos, float *quat)
+
+
+bool WindMillCounter::addTrackingFrame(igtlUint64 frame, string name, float *pos, float *quat)
 {
-	cout << "Frame: " << frame << " Tool: " << name << " -- Position: (" << pos[0] << ", " << pos[1] << ", " << pos[2] 
-	<< ") Quaternion: (" << quat[3] << ", " << quat[0] << ", " << quat[1] << ", " << quat[2] << ")" << endl; 
+	trackingFrame tf;
+	tf.frame = frame;
+	tf.name = name;
+	tf.pos.x() = pos[0];
+	tf.pos.y() = pos[1];
+	tf.pos.z() = pos[2];
+	tf.quat.w() = quat[3]; // openIGTLink puts the scalar last.
+	tf.quat.x() = quat[0];
+	tf.quat.y() = quat[1];
+	tf.quat.z() = quat[2];
+
+	this->printFrameInfo(tf);
+	this->m_trackingFrames.push_back(tf);
+
+	// check to see if we need to shorten the buffer.
+	if( this->m_trackingFrames.size() > TRACKING_BUFFER_SIZE )
+		this->m_trackingFrames.pop_front();
+
+	// compute angular velocity -- http://lost-found-wandering.blogspot.ca/2011/09/revisiting-angular-velocity-from-two.html.
+	trackingFrame f = this->m_trackingFrames.front();
+	trackingFrame b = this->m_trackingFrames.back();
+
+	double delta_t = (1/60.0) * (b.frame - f.frame);
+	if( delta_t > 0.0)
+	{
+
+	Quaternionf r = b.quat * f.quat.inverse();
+	double theta = 2 * acos(r.w());
+	this->m_angularSpeed = (60/TWO_PI)*(theta) / delta_t;
+	// Note: The formula gives rad/s
+	//       Multiplying by 60 sec/min & 1 rot/TWO_PI gives RPM.
+
+	if( this->m_angularSpeed > this->m_maxAngularSpeed)
+		this->m_maxAngularSpeed = this->m_angularSpeed;
+	}
+	else
+	{
+		this->printError("delta_t not greater than 0.");
+	}
+	
+	return true;
+}
+
+bool WindMillCounter::printFrameInfo(trackingFrame tf)
+{
+	cout << "Frame: " << tf.frame << " Tool: " << tf.name << endl
+		<< "Position:" << endl << tf.pos << endl
+		<< "Quaternion:" << endl << tf.quat.w() << endl << tf.quat.vec() << endl; 
 	return true;
 }
 

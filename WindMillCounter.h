@@ -6,6 +6,7 @@
 #include <opencv2/opencv.hpp>
 #include "WMObject.h"
 
+#include <Eigen/Geometry>
 #include "igtlOSUtil.h"
 #include "igtlMessageHeader.h"
 #include "igtlTransformMessage.h"
@@ -14,6 +15,17 @@
 #include "igtlServerSocket.h"
 #include "igtlClientSocket.h"
 #include "igtlStatusMessage.h"
+
+using namespace cv;
+using namespace std;
+using namespace Eigen;
+
+struct trackingFrame {
+	igtlUint64 frame;
+	string name;
+	Vector3d pos;
+	Quaternionf quat;
+};
 
 class WindMillCounter : public WMObject {
 public:
@@ -35,12 +47,15 @@ protected:
 	igtl::MessageHeader::Pointer m_headerMsg;
 	igtl::TimeStamp::Pointer m_timestamp;
 	igtl::PositionMessage::Pointer m_positionMessage;
+	// tracking information.
+	list<trackingFrame> m_trackingFrames;
+	double m_angularSpeed;
+	double m_maxAngularSpeed;
 	
 	// helper functions.
-	bool buildOutFrame(float rpm); // create the output image.
+	bool buildOutFrame(); // create the output image.
 	bool getNewIGTLinkMessage(); // get the latest message.
-	bool printFrameInfo(igtlUint64 frame, string name, float *pos, float *quat);
-	// need the openIGTLink connectors here.
-
+	bool addTrackingFrame(igtlUint64 frame, string name, float *pos, float *quat);
+	bool printFrameInfo(trackingFrame tf);
 };
 #endif
